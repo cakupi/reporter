@@ -1,0 +1,56 @@
+name: Master
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  reporter:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: golang:1.20-bullseye
+    services:
+      clickhouse_node1:
+        image: ghcr.io/aldy505/clickhouse-node1:sha-ec47b00
+        options: >-
+          --health-cmd "wget --spider -q localhost:8123/ping"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 10
+          --health-start-period 60s
+          --hostname clickhouse_node1
+          --restart on-failure:10
+      clickhouse_node2:
+        image: ghcr.io/aldy505/clickhouse-node2:sha-ec47b00
+        options: >-
+          --hostname clickhouse_node2
+          --restart on-failure:10
+      clickhouse_node3:
+        image: ghcr.io/aldy505/clickhouse-node3:sha-ec47b00
+        options: >-
+          --hostname clickhouse_node3
+          --restart on-failure:10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Build
+        run: go build -buildvcs=false .
+
+      - name: Test
+        run: go test -v -cover -covermode=atomic -coverprofile=coverage.out -race ./...
+        env:
+          CLICKHOUSE_DSN: clickhouse://default:@clickhouse_node1:9000,clickhouse_node2:9000,clickhouse_node3:9000/default?dial_timeout=30000ms&max_execution_time=60&debug=false
+          CLICKHOUSE_CLUSTER: ci_cluster
